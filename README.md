@@ -7,6 +7,21 @@
 
 A ruby library/gem for interacting with `.docx` files. currently capabilities include reading paragraphs/bookmarks, inserting text at bookmarks, reading tables/rows/columns/cells and saving the document.
 
+## 🚀 New: Universal Field Replacement
+
+This fork includes a robust field replacement system that solves the common issue of template fields being split across multiple text runs. See [UNIVERSAL_FIELD_REPLACEMENT.md](UNIVERSAL_FIELD_REPLACEMENT.md) for details.
+
+**Quick Example:**
+```ruby
+doc = Docx::Document.open('template.docx')
+doc.replace_fields({
+  'client_name' => 'John Doe',
+  'date' => '2024-01-15',
+  'amount' => '10,000.00'
+})
+doc.save('output.docx')
+```
+
 ## Usage
 
 ### Prerequisites

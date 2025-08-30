@@ -65,6 +65,31 @@ module Docx
           text_runs.each { |tr| yield(tr) }
         end
 
+        # Universal field replacement that handles split text runs
+        # @param replacements [Hash] field_name => replacement_value pairs
+        # @param start_delimiter [String] opening delimiter (default: '_')
+        # @param end_delimiter [String] closing delimiter (default: '_')
+        def replace_fields(replacements, start_delimiter = '_', end_delimiter = '_')
+          full_text = to_s
+          original_text = full_text.dup
+          
+          # Apply all replacements to get the target text
+          replacements.each do |field_name, replacement_value|
+            field_pattern = "#{start_delimiter}#{field_name}#{end_delimiter}"
+            full_text = full_text.gsub(field_pattern, replacement_value.to_s)
+          end
+          
+          # If text changed, update the paragraph
+          if full_text != original_text
+            self.text = full_text
+          end
+        end
+
+        # Legacy method for backward compatibility - works only within individual runs
+        def substitute(pattern, replacement)
+          each_text_run { |tr| tr.substitute(pattern, replacement) }
+        end
+
         def aligned_left?
           ['left', nil].include?(alignment)
         end

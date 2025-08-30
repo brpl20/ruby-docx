@@ -166,6 +166,31 @@ module Docx
 
     alias text to_s
 
+    # Universal field replacement that works regardless of text run splitting
+    # @param replacements [Hash] field_name => replacement_value pairs
+    # @param start_delimiter [String] opening delimiter (default: '_')
+    # @param end_delimiter [String] closing delimiter (default: '_')
+    # @example
+    #   doc.replace_fields({'name' => 'John Doe', 'date' => '2024-01-01'})
+    #   doc.replace_fields({'name' => 'John'}, '{{', '}}') # for {{name}} pattern
+    def replace_fields(replacements, start_delimiter = '_', end_delimiter = '_')
+      # Process paragraphs
+      paragraphs.each do |paragraph|
+        paragraph.replace_fields(replacements, start_delimiter, end_delimiter)
+      end
+      
+      # Process tables
+      tables.each do |table|
+        table.rows.each do |row|
+          row.cells.each do |cell|
+            cell.paragraphs.each do |paragraph|
+              paragraph.replace_fields(replacements, start_delimiter, end_delimiter)
+            end
+          end
+        end
+      end
+    end
+
     def replace_entry(entry_path, file_contents)
       @replace[entry_path] = file_contents
     end
