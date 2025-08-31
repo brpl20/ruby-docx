@@ -3,7 +3,7 @@ require 'docx/elements/element'
 module Docx
   module Elements
     class Bookmark
-      include Element
+      include Docx::Elements::Element
       attr_accessor :name
 
       def self.tag
@@ -51,14 +51,15 @@ module Docx
 
       # Get text run immediately prior to bookmark node
       def get_run_before
+        require 'docx/containers/text_run' unless defined?(Docx::Elements::Containers::TextRun)
         # at_xpath returns the first match found and preceding-sibling returns siblings in the
         # order they appear in the document not the order as they appear when moving out from
         # the starting node
         if not (r_nodes = @node.xpath("./preceding-sibling::w:r")).empty?
           r_node = r_nodes.last
-          Containers::TextRun.new(r_node)
+          Docx::Elements::Containers::TextRun.new(r_node)
         else
-          new_r = Containers::TextRun.create_with(self)
+          new_r = Docx::Elements::Containers::TextRun.create_with(self)
           new_r.insert_before(self)
           new_r
         end
@@ -66,10 +67,11 @@ module Docx
 
       # Get text run immediately after bookmark node
       def get_run_after
+        require 'docx/containers/text_run' unless defined?(Docx::Elements::Containers::TextRun)
         if (r_node = @node.at_xpath("./following-sibling::w:r"))
-          Containers::TextRun.new(r_node)
+          Docx::Elements::Containers::TextRun.new(r_node)
         else
-          new_r = Containers::TextRun.create_with(self)
+          new_r = Docx::Elements::Containers::TextRun.create_with(self)
           new_r.insert_after(self)
           new_r
         end

@@ -1,6 +1,4 @@
 require 'nokogiri'
-require 'docx/elements'
-require 'docx/containers'
 
 module Docx
   module Elements
@@ -30,7 +28,8 @@ module Docx
 
       # Get parent paragraph of element
       def parent_paragraph
-        Elements::Containers::Paragraph.new(parent('w:p'))
+        require 'docx/containers/paragraph' unless defined?(Docx::Elements::Containers::Paragraph)
+        Docx::Elements::Containers::Paragraph.new(parent('w:p'))
       end
 
       # Insertion methods

@@ -40,6 +40,13 @@ module Docx
           elsif @text_nodes.empty?
             new_t = Elements::Text.create_within(self)
             new_t.content = content
+            @text_nodes = [new_t]  # Add to text_nodes array
+          else
+            # Multiple text nodes - replace with single node
+            @text_nodes.each {|n| n.node.remove }
+            new_t = Elements::Text.create_within(self)
+            new_t.content = content
+            @text_nodes = [new_t]
           end
           reset_text
         end
@@ -64,6 +71,41 @@ module Docx
             underline: !@node.xpath('.//w:u').empty?,
             strike: !@node.xpath('.//w:strike').empty?
           }
+        end
+
+        # Make text bold
+        def bold!
+          properties = properties_element || add_properties
+          add_property('w:b', {}, properties)
+          @formatting[:bold] = true
+        end
+
+        # Make text italic
+        def italic!
+          properties = properties_element || add_properties
+          add_property('w:i', {}, properties)
+          @formatting[:italic] = true
+        end
+
+        # Make text underlined
+        def underline!
+          properties = properties_element || add_properties
+          add_property('w:u', {'w:val' => 'single'}, properties)
+          @formatting[:underline] = true
+        end
+
+        # Set font size (in points)
+        def font_size=(size)
+          properties = properties_element || add_properties
+          # Word uses half-points internally
+          add_property('w:sz', {'w:val' => (size * 2).to_s}, properties)
+        end
+
+        # Set font color (hex color without #)
+        def color=(hex_color)
+          properties = properties_element || add_properties
+          hex_color = hex_color.gsub('#', '') if hex_color.start_with?('#')
+          add_property('w:color', {'w:val' => hex_color}, properties)
         end
 
         def to_s
@@ -129,6 +171,25 @@ module Docx
 
         def reset_text
           @text = parse_text
+        end
+
+        def properties_element
+          @node.at_xpath('w:rPr')
+        end
+
+        def add_properties
+          properties = Nokogiri::XML::Node.new('w:rPr', @node.document)
+          @node.prepend_child(properties)
+          properties
+        end
+
+        def add_property(name, attributes, parent)
+          # Remove existing property if present
+          parent.xpath(name).remove
+          
+          property = Nokogiri::XML::Node.new(name, @node.document)
+          attributes.each { |k, v| property[k] = v }
+          parent.add_child(property)
         end
       end
     end

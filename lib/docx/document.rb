@@ -1,9 +1,12 @@
 require 'docx/containers'
 require 'docx/elements'
+require 'docx/elements/image'
 require 'docx/errors'
 require 'docx/helpers'
 require 'nokogiri'
 require 'zip'
+require 'securerandom'
+require 'fileutils'
 
 module Docx
   # The Document class wraps around a docx file and provides methods to
@@ -130,6 +133,7 @@ module Docx
     def save(path)
       update
       Zip::OutputStream.open(path) do |out|
+        # First, write all existing entries (potentially replaced)
         zip.each do |entry|
           next unless entry.file?
 
@@ -137,6 +141,15 @@ module Docx
           value = @replace[entry.name] || zip.read(entry.name)
 
           out.write(value)
+        end
+        
+        # Then, write any new entries that were added via @replace
+        # but don't exist in the original ZIP
+        @replace.each do |entry_name, content|
+          next if zip.find_entry(entry_name) # Skip if already written above
+          
+          out.put_next_entry(entry_name)
+          out.write(content)
         end
 
       end
@@ -147,6 +160,7 @@ module Docx
     def stream
       update
       stream = Zip::OutputStream.write_buffer do |out|
+        # First, write all existing entries (potentially replaced)
         zip.each do |entry|
           next unless entry.file?
 
@@ -157,6 +171,15 @@ module Docx
           else
             out.write(zip.read(entry.name))
           end
+        end
+        
+        # Then, write any new entries that were added via @replace
+        # but don't exist in the original ZIP
+        @replace.each do |entry_name, content|
+          next if zip.find_entry(entry_name) # Skip if already written above
+          
+          out.put_next_entry(entry_name)
+          out.write(content)
         end
       end
 
@@ -191,6 +214,167 @@ module Docx
       end
     end
 
+    # Add a new paragraph with optional content and formatting
+    # @param content [String] initial text content (optional)
+    # @param options [Hash] formatting options
+    # @return [Paragraph] the newly created paragraph
+    def add_paragraph(content = nil, options = {})
+      body_node = @doc.at_xpath('//w:body')
+      
+      # Create paragraph node
+      p_node = Nokogiri::XML::Node.new('w:p', @doc)
+      body_node.add_child(p_node)
+      
+      # Create paragraph object
+      paragraph = parse_paragraph_from(p_node)
+      
+      # Add content if provided
+      if content
+        if options.any?
+          paragraph.add_text(content, options)
+        else
+          paragraph.text = content
+        end
+      end
+      
+      paragraph
+    end
+
+    # Add a paragraph with bold text
+    def add_bold_paragraph(content)
+      add_paragraph(content, bold: true)
+    end
+
+    # Add a paragraph with italic text  
+    def add_italic_paragraph(content)
+      add_paragraph(content, italic: true)
+    end
+
+    # Add an image to the document
+    # @param image_path [String] path to the image file
+    # @param options [Hash] image options
+    # @option options [Integer] :width image width in pixels (required)
+    # @option options [Integer] :height image height in pixels (required)
+    # @option options [Integer] :ppi pixels per inch (default: 72)
+    # @return [Elements::Containers::Paragraph] paragraph containing the image
+    def add_image(image_path, options = {})
+      raise ArgumentError, "Image file not found: #{image_path}" unless File.exist?(image_path)
+      raise ArgumentError, "Width is required" unless options[:width]
+      raise ArgumentError, "Height is required" unless options[:height]
+      
+      # Generate unique IDs - make sure relationship ID is actually unique
+      image_id = "image#{SecureRandom.hex(8)}"
+      rel_id = generate_unique_relationship_id
+      
+      # Get file extension
+      ext = File.extname(image_path).downcase.delete('.')
+      media_path = "word/media/#{image_id}.#{ext}"
+      
+      # Read image data
+      image_data = File.binread(image_path)
+      
+      # Add image to the zip archive
+      replace_entry(media_path, image_data)
+      
+      # Add relationship to document.xml.rels
+      add_image_relationship(rel_id, "media/#{image_id}.#{ext}")
+      
+      # Add content type for the image
+      add_image_content_type(ext)
+      
+      # Create paragraph with image
+      paragraph = add_paragraph
+      
+      # Create run node
+      run_node = Nokogiri::XML::Node.new('w:r', @doc)
+      paragraph.node.add_child(run_node)
+      
+      # Create image element
+      image = Elements::Image.new(run_node, {
+        path: image_path,
+        width: options[:width],
+        height: options[:height],
+        ppi: options[:ppi] || 72,
+        relationship_id: rel_id
+      })
+      
+      # Add image XML to run
+      run_node.add_child(image.to_xml)
+      
+      paragraph
+    end
+
+    private
+
+    def generate_unique_relationship_id
+      # Get existing relationship IDs to avoid conflicts
+      load_rels if @rels.nil?
+      existing_ids = @rels.xpath('//xmlns:Relationship/@Id').map(&:value)
+      
+      # Find next available rId number
+      max_id = existing_ids.map { |id| id.match(/rId(\d+)/)&.[](1)&.to_i }.compact.max || 0
+      "rId#{max_id + 1}"
+    end
+    
+    def add_image_relationship(rel_id, target)
+      # Ensure rels document exists
+      load_rels if @rels.nil?
+      
+      # Check if relationship already exists
+      existing = @rels.at_xpath("//xmlns:Relationship[@Id='#{rel_id}']")
+      return if existing
+      
+      # Create new relationship
+      relationships = @rels.at_xpath('//xmlns:Relationships')
+      rel = Nokogiri::XML::Node.new('Relationship', @rels)
+      rel['Id'] = rel_id
+      rel['Type'] = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image'
+      rel['Target'] = target
+      relationships.add_child(rel)
+      
+      # Save updated rels
+      replace_entry('word/_rels/document.xml.rels', @rels.to_xml)
+    end
+    
+    def add_image_content_type(ext)
+      # Load content types if not already loaded
+      unless @content_types
+        content_types_entry = @zip.find_entry('[Content_Types].xml')
+        if content_types_entry
+          @content_types_xml = content_types_entry.get_input_stream.read
+          @content_types = Nokogiri::XML(@content_types_xml)
+        end
+      end
+      
+      return unless @content_types
+      
+      # Map file extensions to MIME types
+      content_type_map = {
+        'png' => 'image/png',
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'gif' => 'image/gif',
+        'bmp' => 'image/bmp'
+      }
+      
+      mime_type = content_type_map[ext]
+      return unless mime_type
+      
+      # Check if content type already exists
+      types = @content_types.at_xpath('//xmlns:Types')
+      existing = types.at_xpath("xmlns:Default[@Extension='#{ext}']")
+      return if existing
+      
+      # Add content type
+      default_element = Nokogiri::XML::Node.new('Default', @content_types)
+      default_element['Extension'] = ext
+      default_element['ContentType'] = mime_type
+      types.add_child(default_element)
+      
+      # Save updated content types
+      replace_entry('[Content_Types].xml', @content_types.to_xml)
+    end
+
     def replace_entry(entry_path, file_contents)
       @replace[entry_path] = file_contents
     end
@@ -206,8 +390,6 @@ module Docx
     def styles_configuration
       @styles_configuration ||= Elements::Containers::StylesConfiguration.new(@styles.dup)
     end
-
-    private
 
     def load_styles
       @styles_xml = @zip.read('word/styles.xml')
