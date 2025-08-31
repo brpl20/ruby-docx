@@ -65,6 +65,39 @@ module Docx
           text_runs.each { |tr| yield(tr) }
         end
 
+        # Add a new text run with specified formatting
+        # @param content [String] the text content
+        # @param options [Hash] formatting options
+        # @option options [Boolean] :bold make text bold
+        # @option options [Boolean] :italic make text italic
+        # @option options [Boolean] :underline underline text
+        # @option options [Integer] :size font size in points
+        # @option options [String] :color font color in hex
+        # @return [TextRun] the newly created text run
+        def add_text(content, options = {})
+          new_run = TextRun.create_within(self)
+          new_run.text = content
+          
+          # Apply formatting
+          new_run.bold! if options[:bold]
+          new_run.italic! if options[:italic]
+          new_run.underline! if options[:underline]
+          new_run.font_size = options[:size] if options[:size]
+          new_run.color = options[:color] if options[:color]
+          
+          new_run
+        end
+
+        # Add bold text to the paragraph
+        def add_bold_text(content)
+          add_text(content, bold: true)
+        end
+
+        # Add italic text to the paragraph
+        def add_italic_text(content)
+          add_text(content, italic: true)
+        end
+
         # Universal field replacement that handles split text runs
         # @param replacements [Hash] field_name => replacement_value pairs
         # @param start_delimiter [String] opening delimiter (default: '_')
@@ -73,10 +106,25 @@ module Docx
           full_text = to_s
           original_text = full_text.dup
           
-          # Apply all replacements to get the target text
+          # Create a mapping of actual placeholders to their replacements
+          # Only include placeholders that actually exist in the text
+          pattern_map = {}
+          
           replacements.each do |field_name, replacement_value|
             field_pattern = "#{start_delimiter}#{field_name}#{end_delimiter}"
-            full_text = full_text.gsub(field_pattern, replacement_value.to_s)
+            # Only add to map if this exact pattern exists
+            if full_text.include?(field_pattern)
+              pattern_map[field_pattern] = replacement_value.to_s
+            end
+          end
+          
+          # Sort patterns by length (longest first) to avoid partial replacements
+          # For example, this ensures _society_name_full_ is replaced before _society_name_
+          sorted_patterns = pattern_map.keys.sort_by { |pattern| -pattern.length }
+          
+          # Replace each pattern in order
+          sorted_patterns.each do |pattern|
+            full_text = full_text.gsub(pattern, pattern_map[pattern])
           end
           
           # If text changed, update the paragraph

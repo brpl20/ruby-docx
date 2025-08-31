@@ -1,7 +1,7 @@
 module Docx
   module Elements
     class Text
-      include Element
+      include Docx::Elements::Element
 
       def self.tag
         't'
